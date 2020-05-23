@@ -14,7 +14,8 @@ Created on Fri May 22 10:09:02 2020
 # "Field-Wide Equation of State Model Development" that is also available from
 # the download section of Whitson's website.
 
-# The script take a .csv file with the following columns with names (in square brakets):
+# The script takes as input a .csv file with the following columns (column names are 
+# in square brakets):
 # 1st column [SCN]: SCN identifiers (e.g., C10, C11, C12 etc.);
 # 2nd column [mfi_lab]: mole fraction of component as per full composition;
 # 3rd column [wfi_lab]: weight fraction of component as per full composition.
