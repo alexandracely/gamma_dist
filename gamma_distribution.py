@@ -5,25 +5,28 @@ Created on Fri May 22 10:09:02 2020
 @author: Dmitry Molokhov (molokhov@outlook.com)
 """
 # READ IT FIRST:
-# Gamma distribution fitting assumes C10 as starting component.
-# The algoritm is based on Curtis Whitson's work derived primarily
+# Gamma distribution fitting assumes C10 as the starting component.
+# The algorithm is based on Curtis Whitson's work primarily extracted
 # from Phase Behavior SPE Monograph (Volume 20) by Whitson and Brule.
-# Additional information source are numerous papers on Gamma distribution
+# Additional information sources are numerous papers on Gamma distribution
 # which can be found at Whitson's website https://whitson.com/publications/
 # Particularly useful was the 2019 paper by Bilal Younus, Curtis Whitson et al
 # "Field-Wide Equation of State Model Development" that is also available from
-# the download section of their website.
+# the download section of Whitson's website.
+
 # The script take a .csv file with the following columns with names (in square brakets):
 # 1st column [SCN]: SCN identifiers (e.g., C10, C11, C12 etc.);
 # 2nd column [mfi_lab]: mole fraction of component as per full composition;
 # 3rd column [wfi_lab]: weight fraction of component as per full composition.
 # Average sample molecular weight is entered in the main section of the code.
+# GitHub repository https://github.com/dimmol/gamma_dist
 
 import pandas as pd
 import numpy as np
 import scipy.optimize as optim
 import scipy.special as sps
 import scipy.stats as stats
+import matplotlib.pyplot as plt
 pd.set_option('display.max_columns', 500)
 
 # Function to prepare the data for distribution fitting.
@@ -33,12 +36,12 @@ pd.set_option('display.max_columns', 500)
 def prepare_input(df, mw):
     
     # Back-calculating MWs
-    df['MWi'] = df.apply(lambda x : x['wfi_lab']*mw/x['mfi_lab'], axis = 1)
+    df['MWi_lab'] = df.apply(lambda x : x['wfi_lab']*mw/x['mfi_lab'], axis = 1)
     
     # Calculating initial values of upper bounds of individual MWn slices.
     # Upper bounds are considered as midway between SCN MW values.
     # C36+ upper bound is set to an arbitrary number (10000).
-    df['ubound_init'] = df['MWi']+(df['MWi'].shift(-1)-df['MWi'])/2
+    df['ubound_init'] = df['MWi_lab']+(df['MWi_lab'].shift(-1)-df['MWi_lab'])/2
     df['ubound_init'] = df['ubound_init'].fillna(100000)
     
     # Generating regresion variables for component molecular weight bounds:
@@ -59,7 +62,7 @@ def prepare_input(df, mw):
     
     return df
 
-def gamma_distribution(reg_vals, reg_vars, df):
+def gamma_distribution(reg_vals, reg_vars, df, rmse_switch = False):
     
     # Ensuring consistency of input data
     assert len(reg_vals) == len(reg_vars)
@@ -92,8 +95,14 @@ def gamma_distribution(reg_vals, reg_vars, df):
     # Finally calculating RMSE between lab and calculated data. Converting it to 
     # percentage as it is a bigger number and better for the solver
     rmse = 100*((df.loc[df.index[0:-1], 'Wni']-df.loc[df.index[0:-1], 'wni_lab'])**2).mean()**.5
+    
+    if rmse_switch:
+        df['Zni'] = df['Wni']/df['Mi']*df['Wi'].sum(skipna = True)
+        rmse_df = df
+    else:
+        rmse_df = rmse
 
-    return rmse
+    return rmse_df
 
 if __name__ == "__main__":
     
@@ -126,6 +135,35 @@ if __name__ == "__main__":
                             method = 'Nelder-Mead', options={'maxiter':10000})
     res_df = pd.DataFrame({'Variables': reg_variables, 'Values':res.x})
 
-    print(res_df)
-    print('RMSE:', res.fun)
-    # test.to_csv(r'.\DATA\out_test.csv')
+    # Getting out best fit data
+    out_df = gamma_distribution(res.x, reg_variables, df, rmse_switch = True)
+
+    out_df[['SCN', 'Mi', 'Wni', 'Zni']].to_csv(r'.\DATA\out.csv')
+    # Printing out C10+ molecular weight to the console
+    print('Calculated C10+ average molecular weight:', res_df.at[28, 'Values'])
+    
+    # Creating a plot of lab vs calculated compositions
+    plt.style.use('classic')
+    fig = plt.figure(figsize=[7,5])
+    ax = plt.subplot(111)
+    ax.set_xlabel('Calculated Molecular Weight, g/mol')
+    ax.set_ylabel('Normalized Weight Fractions')
+    ax.set_title('Laboratory vs Calculated Data')
+    ax.grid('on')
+    ax.set_yscale('log')
+    ax.set_xlim(0, 700)
+    ax.set_ylim(0.001, 1)
+    ax.xaxis.set_tick_params(size=0)
+    xlab = ax.xaxis.get_label()
+    ylab = ax.yaxis.get_label()
+    xlab.set_style('italic')
+    xlab.set_size(10)
+    ylab.set_style('italic')
+    ylab.set_size(10)
+    ttl = ax.title
+    ttl.set_weight('bold')
+    ax.plot(out_df['Mi'], out_df['wni_lab'], '-ok', markerfacecolor='w', label='Laboratory')
+    ax.plot(out_df['Mi'], out_df['Wni'], 'or', label='Calculated')
+    ax.legend(loc='best', frameon=True, fontsize=10)
+    plt.show()
+    
