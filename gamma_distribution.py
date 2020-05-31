@@ -29,6 +29,8 @@ import scipy.special as sps
 import scipy.stats as stats
 import matplotlib.pyplot as plt
 pd.set_option('display.max_columns', 500)
+import time
+start_time = time.time()
 
 # Function to prepare the data for distribution fitting.
 # Within the function we backcalculate component MWs used by that lab (though they can be entered
@@ -47,8 +49,6 @@ def prepare_input(df, mw):
     
     # Generating regresion variables for component molecular weight bounds:
     df['ubound'] = 'm'+df['SCN']
-    # df['alpha'] = 'alpha'
-    # df['ave_mC10plus'] = 'ave_mC10plus'
     
     # Adding top row to represent a lower boundary of C10 (or upper C9 boundary)
     df_top = pd.DataFrame(pd.DataFrame([['C9']+[np.nan] * (len(df.columns)-1)], columns=df.columns))
@@ -113,7 +113,7 @@ if __name__ == "__main__":
     comp_input = pd.read_csv(r'.\DATA\gamma_dist_input.csv', header = 0, index_col = False)
     
     # Whole sample MW.
-    sample_mw = 161.60
+    sample_mw = 167.80
     # C10+ molecular weight if available in lab report. Otherwise a reasonable estimate.
     ave_MC10plus = 225.0
     # Initial value for C10 lower bound (C9 upper bound) or ita as per Whitson's monograph.
@@ -131,17 +131,28 @@ if __name__ == "__main__":
     # Forming an array of initial values corresponding to these variables (excluding MC36 upper bound):
     init_vals = np.concatenate((df.loc[df.index[0:-1], 'ubound_init'], np.array([1.0, ave_MC10plus])))
     init_vals[np.isnan(init_vals)] = ita
+    # Presetting upper and lower boundaries for the solver.
+    # I assume 2% range on SCNs below C25 and 5% on C25 and higher.
+    # No boundary on shape factor and 5% on C10 molecular weight.
+    ub = init_vals+init_vals*0.02
+    ub[16:] = init_vals[16:]+init_vals[16:]*0.05
+    lb = init_vals-init_vals*0.02
+    lb[16:] = init_vals[16:]-init_vals[16:]*0.05
+    lb[27] = -np.inf
+    ub[27] = np.inf
     
     res = optim.minimize(gamma_distribution, args=(reg_variables, df), x0=init_vals, 
-                            method = 'Nelder-Mead', options={'maxiter':10000})
+                            method = 'SLSQP', bounds=optim.Bounds(lb, ub), options={'maxiter':10000})
+
     res_df = pd.DataFrame({'Variables': reg_variables, 'Values':res.x})
 
     # Getting out best fit data
     out_df = gamma_distribution(res.x, reg_variables, df, rmse_switch = True)
 
-    out_df[['SCN', 'Mi', 'Wni', 'Zni']].to_csv(r'.\DATA\out.csv')
+    out_df.to_csv(r'.\DATA\out.csv') # [['SCN', 'Mi', 'Wni', 'Zni']]
     # Printing out C10+ molecular weight to the console
     print('Calculated C10+ average molecular weight:', res_df.at[28, 'Values'])
+    print('RMSE: ', res.fun)
     
     # Creating a plot of lab vs calculated compositions
     plt.style.use('classic')
@@ -168,3 +179,4 @@ if __name__ == "__main__":
     ax.legend(loc='best', frameon=True, fontsize=10)
     plt.show()
     
+    print("--- Execution time %s seconds ---" % (time.time() - start_time))
