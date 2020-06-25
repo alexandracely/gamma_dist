@@ -15,14 +15,33 @@ class FlashExperimentData:
     def __init__(self, lqd, gas, res, ave_lqd_mw):
         self.liquid = lqd
         self.gas = gas
-        self.res = res
-        self.av_lqd_mw = ave_lqd_mw
+        self.reservoir = res
+        self.av_lqd_mw = ave_lqd_mw 
+        self._c10_heavy_end_lqd = None
+        self._c7_heavy_end_lqd = None
     
     def assign_composition(self):
         pass
     
-    def split_heavy_end(self, start_SCN):
-        pass
+    # Don't like this way of splitting the heavy end but I reckon
+    # I exhausted my knowledge of Pandas.
+    @property
+    def c10_heavy_end_lqd(self):
+        i = self.liquid[self.liquid['scn'] == 'C10'].index[0]
+        self._c10_heavy_end_lqd = self.liquid.iloc[i:]
+        return self._c10_heavy_end_lqd
+    
+    @property
+    def c7_heavy_end_lqd(self):
+        i = self.liquid[self.liquid['scn'] == 'C7'].index[0]
+        self._c7_heavy_end_lqd = self.liquid.iloc[i:]
+        return self._c7_heavy_end_lqd
+    
+    # The method to define the heavy end of the liquid fraction.
+    # By default assumes that the fraction starts at C10.
+    # def split_heavy_end_lqd(self, start_SCN = 'C10'):
+    #     heavy_end = self.liquid.loc[start_SCN:]
+    #     return heavy_end
 
 # Class that contains functionality to parse a Core Labs Excel report
 # and pass the data to FlashExperimentData class instance.
@@ -32,13 +51,13 @@ class CoreLabsXLSXLoader:
     # Depending whether a specific worksheet is input a class instance has
     # a functionality either to read the whole flash data found in the
     # workbook or just that individual worksheet.
-    def __init__(self, report_path, ws=None):
+    def __init__(self, report_path, worksheet=None):
         self.file_path = report_path
-        self.worksheet = ws
+        self.worksheet = worksheet
     
     # Method to parse an individual worksheet.
-    def read_flash_data(self, ws):
-        worksheet = ws
+    def read_flash_data(self, worksheet):
+        # worksheet = ws
         # Reading the composition table as the whole.
         df = pd.read_excel(self.file_path, worksheet, skiprows = 11, nrows = 52, 
                         usecols = 'B:I', header = None,
@@ -47,12 +66,14 @@ class CoreLabsXLSXLoader:
         # Filling in empty cells in carbon group columns.
         df['scn'] = df['scn'].ffill()
         df.set_index(['scn', 'cl_name'], inplace=True)
-        liq = df.iloc[:, 0:2]
-        gas = df.iloc[:, 2:4]
-        res = df.iloc[:, 4:]
+        # df.sort_index(inplace=True)
+        liq = df.iloc[:, 0:2].reset_index()
+        gas = df.iloc[:, 2:4].reset_index()
+        res = df.iloc[:, 4:].reset_index()
         return liq, gas, res
     
     def read(self):
+        samples = []
         wb = load_workbook(self.file_path)
         if self.worksheet is None:
             flash_data_list = [worksheet for worksheet in wb.sheetnames if
@@ -63,13 +84,13 @@ class CoreLabsXLSXLoader:
             sheet = wb[worksheet]
             desc = sheet['B8'].value+sheet['B9'].value
             depth, sample_num, cylinder = self.__parser(desc)
-            print('Depth: ', depth, 'Sample number: ', sample_num, 'Cylinder: ', cylinder)
+            # print('Depth: ', depth, 'Sample number: ', sample_num, 'Cylinder: ', cylinder)
             liq, gas, res = self.read_flash_data(worksheet)
             # Typically, flashed liquid average mole weight in CL reports is in
             # the cell O39:
-            lqd_av_mw = sheet['B8'].value+sheet['O39'].value
-            
-        print(liq)
+            lqd_av_mw = sheet['O39'].value
+            samples.append(FlashExperimentData(liq, gas, res, lqd_av_mw))
+        return samples
     
     # Parcer function is supposed to extract useful sample descriptors from
     # the text strings above the composition table. In most Core LAbs reports
@@ -95,6 +116,9 @@ class CoreLabsXLSXLoader:
 if __name__ == "__main__":
     
     path = '..\..\PVT_Reports\PS1.xlsx'
-    cl_report = CoreLabsXLSXLoader(path, ws='C.1')
-    cl_report.read()
+    cl_report = CoreLabsXLSXLoader(path, worksheet='C.1')
+    sam = cl_report.read()
+    print(sam[0].liquid)
+    
+    print(sam[0].c10_heavy_end_lqd)
     # cl_report.read_flash_data()
