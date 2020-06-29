@@ -59,7 +59,8 @@ def prepare_input(df, mw):
     
     # Adding a regression variable for lower C10 molecular weight boundary:
     df.at[0,'ubound'] = 'ita'
-    df.at[27,'ubound'] = df.at[27,'ubound_init']
+    # df.at[27,'ubound'] = df.at[27,'ubound_init']
+    df.iloc[-1, df.columns.get_loc('ubound')] = df.iloc[-1, df.columns.get_loc('ubound_init')]
     
     return df
 
