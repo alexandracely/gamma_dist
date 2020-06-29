@@ -9,10 +9,11 @@ from openpyxl import load_workbook
 import pandas as pd
 import re
 
+
 # Class to store sample data and relevant fluid properties.
 class FlashExperimentData:
     
-    def __init__(self, lqd, gas, res, ave_lqd_mw):
+    def __init__(self, lqd=None, gas=None, res=None, ave_lqd_mw=None):
         self.liquid = lqd
         self.gas = gas
         self.reservoir = res
@@ -42,6 +43,19 @@ class FlashExperimentData:
     # def split_heavy_end_lqd(self, start_SCN = 'C10'):
     #     heavy_end = self.liquid.loc[start_SCN:]
     #     return heavy_end
+
+
+class FlashExpDataCollection(FlashExperimentData, dict):
+    
+    def __init__(self, *worksheet_names):
+        dict.__init__(self, ((wn, FlashExperimentData.__init__()) for wn in worksheet_names))
+        
+    @property
+    def sample_names(self):
+        return self.keys()
+    
+    def add_sample(self, sample_name, sample):
+        self[sample_name].append(sample)
 
 # Class that contains functionality to parse a Core Labs Excel report
 # and pass the data to FlashExperimentData class instance.
@@ -73,13 +87,13 @@ class CoreLabsXLSXLoader:
         return liq, gas, res
     
     def read(self):
-        samples = []
         wb = load_workbook(self.file_path)
-        if self.worksheet is None:
+        if self.worksheet:
+            flash_data_list = [self.worksheet]
+        else:
             flash_data_list = [worksheet for worksheet in wb.sheetnames if
                                re.search('C\.\d+', worksheet)]
-        else:
-            flash_data_list = [self.worksheet]
+        samples = FlashExpDataCollection(flash_data_list)
         for worksheet in flash_data_list:
             sheet = wb[worksheet]
             desc = sheet['B8'].value+sheet['B9'].value
@@ -89,7 +103,7 @@ class CoreLabsXLSXLoader:
             # Typically, flashed liquid average mole weight in CL reports is in
             # the cell O39:
             lqd_av_mw = sheet['O39'].value
-            samples.append(FlashExperimentData(liq, gas, res, lqd_av_mw))
+            samples.add_sample(worksheet, FlashExperimentData(liq, gas, res, lqd_av_mw))
         return samples
     
     # Parcer function is supposed to extract useful sample descriptors from
@@ -112,13 +126,14 @@ class CoreLabsXLSXLoader:
         except:
             cylinder = 'N/A'
         return depth, sample_num, cylinder
-    
+
+
 if __name__ == "__main__":
     
     path = '..\..\PVT_Reports\PS1.xlsx'
     cl_report = CoreLabsXLSXLoader(path, worksheet='C.1')
-    sam = cl_report.read()
-    print(sam[0].liquid)
+    sample_collection = cl_report.read()
+    print(sample_collection.sample_names)
     
-    print(sam[0].c10_heavy_end_lqd)
+    # print(sample_collection[0].c10_heavy_end_lqd)
     # cl_report.read_flash_data()
