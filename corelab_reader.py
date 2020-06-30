@@ -18,7 +18,11 @@ class FlashExperimentData:
         self.liquid = lqd
         self.gas = gas
         self.reservoir = res
-        self.av_lqd_mw = ave_lqd_mw 
+        self.av_lqd_mw = ave_lqd_mw
+        # Estimation of average MW of C7 & C10 plus fractions
+        # can be implemented later.
+        self._ave_C10_mw = None
+        self._ave_C7_mw = None
         self._c10_heavy_end_lqd = None
         self._c7_heavy_end_lqd = None
     
@@ -34,6 +38,11 @@ class FlashExperimentData:
         i = self.liquid[self.liquid['scn'] == 'C10'].index[0]
         self._c10_heavy_end_lqd = self.liquid.iloc[i:]
         return self._c10_heavy_end_lqd
+
+    @property
+    def ave_C10_mw(self):
+        self._ave_C10_mw = 225
+        return self._ave_C10_mw
     
     @property
     def c7_heavy_end_lqd(self):
@@ -46,6 +55,7 @@ class FlashExpDataCollection(FlashExperimentData, dict):
     
     def __init__(self, worksheet_names):
         dict.__init__(self, ((wn, FlashExperimentData.__init__(self)) for wn in worksheet_names))
+        self._collection = []
         
     @property
     def sample_names(self):
@@ -54,7 +64,7 @@ class FlashExpDataCollection(FlashExperimentData, dict):
     def add_sample(self, sample_name, sample):
         self[sample_name] = sample
         
-    def _prepare_input(self, lqd, mw, n=10):
+    def _prepare_input(self, lqd, mw, id, n=10):
         df = lqd.copy()
         df['MWi_lab'] = df.apply(lambda x : x['lqd_wp']*mw/x['lqd_mp'], axis = 1)
         # Calculating initial values of upper bounds of individual MWn slices.
@@ -77,15 +87,29 @@ class FlashExpDataCollection(FlashExperimentData, dict):
         # Adding a regression variable for lower C10 molecular weight boundary:
         df.at[0,'ubound'] = 'ita'
         df.iloc[-1, df.columns.get_loc('ubound')] = df.iloc[-1, df.columns.get_loc('ubound_init')]
-        
+        df['sample_id'] = id.replace('.', '_')
+        df['heavy_end_mw'] = id.replace('.', '_')+'_heavy_mw'
         return df
         
-    def gamma_distribution_fit(self, output_file=None):
-        gamma_collection = pd.DataFrame()
+    def _prepare_regression(self):
         for key, item in self.items():
-            df = self._prepare_input(item.c10_heavy_end_lqd, item.av_lqd_mw)
-            print(df)
-        # pass
+            df = self._prepare_input(item.c10_heavy_end_lqd, item.av_lqd_mw, key)
+            self._collection.append(df)
+        
+    def gamma_distribution_fit(self, n=10):
+        # Gamma distribution fit from C7 is not implemented yet.
+        if n == 7:
+            raise NotImplementedError
+        self._prepare_regression()
+        # reg_variables = np.concatenate(self._fit_df.loc[self._fit_df.index[0:-1], 'ubound'].unique(),#, np.array(['alpha']), 
+        #                                 self._fit_df.loc[self._fit_df.index[0:-1], 'heavy_end_mw'].unique())
+        reg_variables = np.concatenate((np.array(['alpha']), self._fit_df.loc[self._fit_df.index[0:-1], 'ubound'].unique(),
+                                        self._fit_df.loc[self._fit_df.index[0:-1], 'heavy_end_mw'].unique()))
+        reg_variables = np.delete(reg_variables, np.where(reg_variables == 100000))
+        init_vals = np.concatenate((np.array([1.0]), self._fit_df.loc[self._fit_df.index[0:-1].unique(), 'ubound_init']))
+        print(init_vals)
+        # print(self._fit_df.head())
+        # self._fit_df.to_csv('out.csv')
 
 # Class that contains functionality to parse a Core Labs Excel report
 # and pass the data to FlashExperimentData class instance.
@@ -119,7 +143,7 @@ class CoreLabsXLSXLoader:
     def read(self):
         wb = load_workbook(self.file_path)
         if self.worksheet:
-            flash_data_list = [self.worksheet]
+            flash_data_list = self.worksheet
         else:
             flash_data_list = [worksheet for worksheet in wb.sheetnames if
                                re.search('C\.\d+', worksheet)]
@@ -133,7 +157,8 @@ class CoreLabsXLSXLoader:
             # Typically, flashed liquid average mole weight in CL reports is in
             # the cell O39:
             lqd_av_mw = sheet['O39'].value
-            samples.add_sample(worksheet, FlashExperimentData(liq, gas, res, lqd_av_mw))
+            samples.add_sample(worksheet, FlashExperimentData(liq, gas, res,
+                                                              lqd_av_mw))
         return samples
     
     # Parcer function is supposed to extract useful sample descriptors from
@@ -159,8 +184,8 @@ class CoreLabsXLSXLoader:
 
 if __name__ == "__main__":
     
-    path = '..\..\PVT_Reports\PS1.xlsx'
-    cl_report = CoreLabsXLSXLoader(path, worksheet='C.1')
+    path = '.\DATA\PS1.xlsx'
+    cl_report = CoreLabsXLSXLoader(path, worksheet=['C.1', 'C.4'])
     sample_collection = cl_report.read()
     # print(sample_collection['C.1'].c10_heavy_end_lqd)
     sample_collection.gamma_distribution_fit()
