@@ -9,7 +9,10 @@ from openpyxl import load_workbook
 import pandas as pd
 import numpy as np
 import re
-
+import scipy.special as sps
+import scipy.stats as stats
+import scipy.optimize as optim
+import time
 
 # Class to store sample data and relevant fluid properties.
 class FlashExperimentData:
@@ -26,6 +29,7 @@ class FlashExperimentData:
         self._c10_heavy_end_lqd = None
         self._c7_heavy_end_lqd = None
         self.gamma_input = None
+        self.gamma_output = None
     
     def assign_composition(self):
         pass
@@ -42,7 +46,7 @@ class FlashExperimentData:
 
     @property
     def ave_C10_mw(self):
-        self._ave_C10_mw = 225
+        self._ave_C10_mw = 220
         return self._ave_C10_mw
     
     @property
@@ -96,8 +100,55 @@ class FlashExpDataCollection(FlashExperimentData, dict):
     def _prepare_regression(self):
         for key, item in self.items():
             item.prepare_input(key)
-            # df = self._prepare_input(item.c10_heavy_end_lqd, item.av_lqd_mw, key)
-            # self._collection.append(df)
+            
+    def gamma_distribution(self, reg_vals, reg_vars, rmse_switch = False):
+
+        # Ensuring consistency of input data
+        assert len(reg_vals) == len(reg_vars)
+        
+        # Creating a dictionary of regression values indexed with variable names:
+        lookup = dict()
+        for i in range(len(reg_vals)):
+            lookup[reg_vars[i]] = reg_vals[i]
+        
+        # Updating the dataframe with set regression values (replacing variables with values):
+        # Note, this time it is not a single dataframe but a class containing a number of dataframes.
+        error_array = pd.Series(dtype='float64')
+        for key, item in self.items():
+            df = item.gamma_input
+            df = df.replace(lookup)
+            ind = key.replace('.', '_')+'_heavy_mw'
+            # Below equation references are from the SPE Phase Behavior monograph.
+            beta = (lookup[ind]-lookup['ita'])/lookup['alpha'] # Equation 5.14
+            df['y'] = (df['ubound']-lookup['ita'])/beta # Equation 5.22
+            # Below is the equation 5.20 from the monograph but with correction of the typo.
+            # Correct form can be derived from the Equation 5.13.
+            # Another typo is in the Equation 5.15 of the original SPE monograph. Correct
+            # form of the equation can be found in 1990 Whiton's paper "Application of the Gamma
+            # Distribution Model to MW and Boiling Point Data For Petroleum Fractions", Equation 21
+            df['Q'] = (np.exp(-df['y'])*(df['y']**lookup['alpha'])/
+                       sps.gamma(lookup['alpha']))
+            df['P0'] = stats.gamma.cdf((df['ubound']-lookup['ita']), 
+                                       a=lookup['alpha'], scale=beta) # Equation 5.18
+            df['P1'] = df['P0']-(df['Q']/lookup['alpha']) # Equation 5.19
+            df['Mi'] = (lookup['ita']+lookup['alpha']*beta*
+                        ((df['P1']-df['P1'].shift())/(df['P0']-df['P0'].shift()))) # Equation 5.17
+            df['Wi'] = df['Mi'] * (df['P0']-df['P0'].shift()) # Weight
+            df['Wni'] = df['Wi']/df['Wi'].sum(skipna = True) # Normalised weight fraction
+            # Finally calculating RMSE between lab and calculated data. Converting it to 
+            # percentage as it is a bigger number and better for the solver
+            rmse = 100*((df.loc[df.index[0:-1], 'Wni']-df.loc[df.index[0:-1], 'wni_lab'])**2).mean()**.5
+            
+            temp = (df.loc[df.index[1:-1], 'Wni']-df.loc[df.index[1:-1], 'wni_lab'])**2
+            error_array = pd.concat([error_array, temp], ignore_index=True)
+            
+            if rmse_switch:
+                df['Zni'] = df['Wni']/df['Mi']*df['Wi'].sum(skipna = True)
+                item.gamma_output = df
+
+        # rmse = 100*error_array.mean()**0.5
+    
+        return 100*error_array.mean()**0.5
         
     def gamma_distribution_fit(self, n=10, alpha=1):
         # Gamma distribution fit from C7 is not implemented yet.
@@ -116,9 +167,37 @@ class FlashExpDataCollection(FlashExperimentData, dict):
         init_vals = pd.Series(alpha).append(init_vals, ignore_index=True)
         for key, item in self.items():
             init_vals = init_vals.append(pd.Series(item.ave_C10_mw), ignore_index=True)
+            
+        ub = init_vals+init_vals*0.02
+        ub[17:] = init_vals[17:]+init_vals[17:]*0.05
+        lb = init_vals-init_vals*0.02
+        lb[17:] = init_vals[17:]-init_vals[17:]*0.05
+        lb[0] = -np.inf
+        ub[0] = np.inf
         
-        print(reg_variables)
-        print(init_vals)
+        # self.gamma_distribution(init_vals, reg_variables)
+        res = optim.minimize(self.gamma_distribution, args=(reg_variables), x0=init_vals,
+                             method = 'SLSQP', bounds=optim.Bounds(lb, ub), options={'maxiter':10000})
+        res_df = pd.DataFrame({'Variables': reg_variables, 'Values':res.x})
+        print('RMSE: ', res.fun)
+
+        self.gamma_distribution(res.x, reg_variables, rmse_switch = True)
+        
+        for key, item in self.items():
+            item.gamma_output.to_csv(r'.\DATA\out_new.csv', mode='a') # [['SCN', 'Mi', 'Wni', 'Zni']]
+        
+        # lookup = dict()
+        # for i in range(len(init_vals)):
+        #     lookup[reg_variables[i]] = init_vals[i]
+        
+        # for key, item in self.items():
+        #     item.gamma_input = item.gamma_input.replace(lookup)
+        #     item.gamma_input.to_csv('out.csv', mode='a')# = item.gamma_input.replace(lookup)
+        
+        # print(len(reg_variables))
+        # print(len(init_vals))
+        # print(len(reg_variables) == len(init_vals))
+        # assert len(reg_variables) == len(init_vals)
 
 
 # Class that contains functionality to parse a Core Labs Excel report
@@ -194,11 +273,14 @@ class CoreLabsXLSXLoader:
 
 if __name__ == "__main__":
     
-    path = '.\DATA\PS1.xlsx'
-    cl_report = CoreLabsXLSXLoader(path, worksheet=['C.1', 'C.4'])
+    start_time = time.time()
+    input_file = '.\DATA\PS1.xlsx'
+    cl_report = CoreLabsXLSXLoader(input_file) #, worksheet=['C.1', 'C.4']
     sample_collection = cl_report.read()
     # print(sample_collection['C.1'].c10_heavy_end_lqd)
     sample_collection.gamma_distribution_fit()
+    
+    print("--- Execution time %s seconds ---" % (time.time() - start_time))
     
     # print(sample_collection[0].c10_heavy_end_lqd)
     # cl_report.read_flash_data()
