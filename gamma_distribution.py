@@ -59,7 +59,8 @@ def prepare_input(df, mw):
     
     # Adding a regression variable for lower C10 molecular weight boundary:
     df.at[0,'ubound'] = 'ita'
-    df.at[27,'ubound'] = df.at[27,'ubound_init']
+    # df.at[27,'ubound'] = df.at[27,'ubound_init']
+    df.iloc[-1, df.columns.get_loc('ubound')] = df.iloc[-1, df.columns.get_loc('ubound_init')]
     
     return df
 
@@ -95,7 +96,7 @@ def gamma_distribution(reg_vals, reg_vars, df, rmse_switch = False):
     df['Wni'] = df['Wi']/df['Wi'].sum(skipna = True) # Normalised weight fraction
     # Finally calculating RMSE between lab and calculated data. Converting it to 
     # percentage as it is a bigger number and better for the solver
-    rmse = 100*((df.loc[df.index[0:-1], 'Wni']-df.loc[df.index[0:-1], 'wni_lab'])**2).mean()**.5
+    rmse = 100*((df.loc[df.index[1:-1], 'Wni']-df.loc[df.index[1:-1], 'wni_lab'])**2).mean()**.5
     
     if rmse_switch:
         df['Zni'] = df['Wni']/df['Mi']*df['Wi'].sum(skipna = True)
@@ -113,7 +114,7 @@ if __name__ == "__main__":
     comp_input = pd.read_csv(r'.\DATA\gamma_dist_input.csv', header = 0, index_col = False)
     
     # Whole sample MW.
-    sample_mw = 167.80
+    sample_mw = 171#167.80
     # C10+ molecular weight if available in lab report. Otherwise a reasonable estimate.
     ave_MC10plus = 225.0
     # Initial value for C10 lower bound (C9 upper bound) or ita as per Whitson's monograph.
