@@ -3,6 +3,8 @@
 Created on Mon Jun  8 19:26:05 2020
 
 @author: Dmitry Molokhov (molokhov@outlook.com)
+
+GitHub: https://github.com/dimmol/gamma_dist
 """
 
 from openpyxl import load_workbook
@@ -13,6 +15,7 @@ import scipy.special as sps
 import scipy.stats as stats
 import scipy.optimize as optim
 import time
+import matplotlib.pyplot as plt
 
 # Class to store sample data and relevant fluid properties.
 class FlashExperimentData:
@@ -30,6 +33,8 @@ class FlashExperimentData:
         self._c7_heavy_end_lqd = None
         self.gamma_input = None
         self.gamma_output = None
+        self.depth = None
+        self.cylinder = None
     
     def assign_composition(self):
         pass
@@ -59,7 +64,7 @@ class FlashExperimentData:
 
     @property
     def ave_C10_mw(self):
-        self._ave_C10_mw = 225
+        self._ave_C10_mw = self._calculate_MW()
         return self._ave_C10_mw
     
     @property
@@ -196,23 +201,42 @@ class FlashExpDataCollection(FlashExperimentData, dict):
 
         self.gamma_distribution(res.x, reg_variables, rmse_switch = True)
         
+    def gamma_distribution_export(self, file_path):
+        
         for key, item in self.items():
-            item.gamma_output.to_csv(r'.\DATA\out_new.csv', mode='a') # [['SCN', 'Mi', 'Wni', 'Zni']]
+            item.gamma_output.to_csv(file_path, mode='a') # [['SCN', 'Mi', 'Wni', 'Zni']]
+            
+    def _sample_plot(self, df, cylinder=None, depth=None):
+        # Creating a plot of lab vs calculated compositions
+        plt.style.use('classic')
+        fig = plt.figure(figsize=[7,5])
+        fig.suptitle('Laboratory vs Calculated Data')
+        ax = plt.subplot(111)
+        ax.set_xlabel('Calculated Molecular Weight, g/mol')
+        ax.set_ylabel('Normalized Weight Fractions')
+        ax.set_title('Cylinder: '+str(cylinder)+' Depth: '+str(depth)+'m')
+        ax.grid('on')
+        ax.set_yscale('log')
+        ax.set_xlim(0, 700)
+        ax.set_ylim(0.001, 1)
+        ax.xaxis.set_tick_params(size=0)
+        xlab = ax.xaxis.get_label()
+        ylab = ax.yaxis.get_label()
+        xlab.set_style('italic')
+        xlab.set_size(10)
+        ylab.set_style('italic')
+        ylab.set_size(10)
+        ttl = ax.title
+        ttl.set_weight('bold')
+        ax.plot(df['Mi'], df['wni_lab'], '-ok', markerfacecolor='w', label='Laboratory')
+        ax.plot(df['Mi'], df['Wni'], 'or', label='Calculated')
+        ax.legend(loc='best', frameon=True, fontsize=10)
+        plt.show()
+            
+    def gamma_distribution_plot(self):
+        for key, item in self.items():
+            self._sample_plot(item.gamma_output, item.cylinder, item.depth)
         
-        # lookup = dict()
-        # for i in range(len(init_vals)):
-        #     lookup[reg_variables[i]] = init_vals[i]
-        
-        # for key, item in self.items():
-        #     item.gamma_input = item.gamma_input.replace(lookup)
-        #     item.gamma_input.to_csv('out.csv', mode='a')# = item.gamma_input.replace(lookup)
-        
-        # print(len(reg_variables))
-        # print(len(init_vals))
-        # print(len(reg_variables) == len(init_vals))
-        # assert len(reg_variables) == len(init_vals)
-
-
 # Class that contains functionality to parse a Core Labs Excel report
 # and pass the data to FlashExperimentData class instance.
 # openpyxl only works with Excel 2010+ file format.
@@ -261,6 +285,8 @@ class CoreLabsXLSXLoader:
             lqd_av_mw = sheet['O39'].value
             samples.add_sample(worksheet, FlashExperimentData(liq, gas, res,
                                                               lqd_av_mw))
+            samples[worksheet].depth = depth
+            samples[worksheet].cylinder = cylinder
         return samples
     
     # Parcer function is supposed to extract useful sample descriptors from
@@ -291,10 +317,9 @@ if __name__ == "__main__":
     cl_report = CoreLabsXLSXLoader(input_file) #, worksheet=['C.1', 'C.4']
     sample_collection = cl_report.read()
     # print(sample_collection['C.1'].c10_heavy_end_lqd)
-    sample_collection['C.1']._calculate_MW()
-    # sample_collection.gamma_distribution_fit()
+    # sample_collection['C.1']._calculate_MW()
+    sample_collection.gamma_distribution_fit()
+    sample_collection.gamma_distribution_export(r'.\DATA\gamma.csv')
+    sample_collection.gamma_distribution_plot()
     
     print("--- Execution time %s seconds ---" % (time.time() - start_time))
-    
-    # print(sample_collection[0].c10_heavy_end_lqd)
-    # cl_report.read_flash_data()
