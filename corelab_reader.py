@@ -153,9 +153,6 @@ class FlashExpDataCollection(FlashExperimentData, dict):
                         ((df['P1']-df['P1'].shift())/(df['P0']-df['P0'].shift()))) # Equation 5.17
             df['Wi'] = df['Mi'] * (df['P0']-df['P0'].shift()) # Weight
             df['Wni'] = df['Wi']/df['Wi'].sum(skipna = True) # Normalised weight fraction
-            # Finally calculating RMSE between lab and calculated data. Converting it to 
-            # percentage as it is a bigger number and better for the solver
-            # rmse = 100*((df.loc[df.index[0:-1], 'Wni']-df.loc[df.index[0:-1], 'wni_lab'])**2).mean()**.5
             
             temp = (df.loc[df.index[1:-1], 'Wni']-df.loc[df.index[1:-1], 'wni_lab'])**2
             error_array = pd.concat([error_array, temp], ignore_index=True)
@@ -171,10 +168,6 @@ class FlashExpDataCollection(FlashExperimentData, dict):
         if n == 7:
             raise NotImplementedError
         self._prepare_regression()
-        # reg_variables = np.concatenate(( 
-        #                                 self[sample_names[0]].gamma_input.loc[self[sample_names[0]].gamma_input.index[0:-1], 'ubound'].unique())#,
-                                        # self[sample_names[0]].gamma_input.loc[self._fit_df.index[0:-1], 'heavy_end_mw'].unique()))
-        # reg_variables = np.delete(reg_variables, np.where(reg_variables == 100000))
         df = self[self.sample_names[0]].gamma_input
         reg_variables = np.concatenate((np.array(['alpha']), df.loc[df.index[0:-1], 'ubound'].unique(),
                                         np.array([sample.replace('.', '_')+'_heavy_mw' for sample in self.sample_names])))
@@ -191,13 +184,13 @@ class FlashExpDataCollection(FlashExperimentData, dict):
         lb[0] = -np.inf
         ub[0] = np.inf
     
-        
-        # self.gamma_distribution(init_vals, reg_variables)
         res = optim.minimize(self.gamma_distribution, args=(reg_variables), x0=init_vals,
                              method = 'SLSQP', bounds=optim.Bounds(lb, ub), options={'maxiter':10000})
         res_df = pd.DataFrame({'Variables': reg_variables, 'Values':res.x})
         print('RMSE: ', res.fun)
         print(res_df)
+        res_df = res_df.append({'Variables' : 'RMSE', 'Values' : res.fun}, ignore_index=True)
+        res_df.to_csv(r'.\DATA\results.csv')
 
         self.gamma_distribution(res.x, reg_variables, rmse_switch = True)
         
@@ -251,7 +244,6 @@ class CoreLabsXLSXLoader:
     
     # Method to parse an individual worksheet.
     def read_flash_data(self, worksheet):
-        # worksheet = ws
         # Reading the composition table as the whole.
         df = pd.read_excel(self.file_path, worksheet, skiprows = 11, nrows = 52, 
                         usecols = 'B:I', header = None,
