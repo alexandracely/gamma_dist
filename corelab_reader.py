@@ -43,10 +43,23 @@ class FlashExperimentData:
         i = self.liquid[self.liquid['scn'] == 'C10'].index[0]
         self._c10_heavy_end_lqd = self.liquid.iloc[i:]
         return self._c10_heavy_end_lqd
+    
+    # Calculating MW for the heavy end using lab MWs for light SCNs. These are often
+    # inconsistent with book MWs for light components. This will introduce some errors in
+    # resulting MW but this will hopefully be addressed by regression.
+    def _calculate_MW(self, n=10):
+        df = self.liquid[self.liquid['lqd_wp'] != 0].copy()
+        mw = self.av_lqd_mw
+        i = df[df['scn'] == 'C'+str(n)].index[0]
+        df['MW_lab'] = df.apply(lambda x : x['lqd_wp']*mw/x['lqd_mp'], axis = 1)
+        a = df.loc[i:, 'lqd_wp'].sum()/100
+        b = 1/self.av_lqd_mw
+        c = df.loc[:i-1, 'lqd_wp'].div(df.loc[:i-1, 'MW_lab']).sum()/100
+        return a/(b-c)
 
     @property
     def ave_C10_mw(self):
-        self._ave_C10_mw = 220
+        self._ave_C10_mw = 225
         return self._ave_C10_mw
     
     @property
@@ -56,8 +69,8 @@ class FlashExperimentData:
         return self._c7_heavy_end_lqd
     
     def prepare_input(self, id, n=10):
-        lqd=self.c10_heavy_end_lqd
-        mw=self.av_lqd_mw
+        lqd = self.c10_heavy_end_lqd
+        mw = self.av_lqd_mw
         self.gamma_input = lqd.copy()
         self.gamma_input['MWi_lab'] = self.gamma_input.apply(lambda x : x['lqd_wp']*mw/x['lqd_mp'], axis = 1)
         # Calculating initial values of upper bounds of individual MWn slices.
@@ -137,7 +150,7 @@ class FlashExpDataCollection(FlashExperimentData, dict):
             df['Wni'] = df['Wi']/df['Wi'].sum(skipna = True) # Normalised weight fraction
             # Finally calculating RMSE between lab and calculated data. Converting it to 
             # percentage as it is a bigger number and better for the solver
-            rmse = 100*((df.loc[df.index[0:-1], 'Wni']-df.loc[df.index[0:-1], 'wni_lab'])**2).mean()**.5
+            # rmse = 100*((df.loc[df.index[0:-1], 'Wni']-df.loc[df.index[0:-1], 'wni_lab'])**2).mean()**.5
             
             temp = (df.loc[df.index[1:-1], 'Wni']-df.loc[df.index[1:-1], 'wni_lab'])**2
             error_array = pd.concat([error_array, temp], ignore_index=True)
@@ -145,8 +158,6 @@ class FlashExpDataCollection(FlashExperimentData, dict):
             if rmse_switch:
                 df['Zni'] = df['Wni']/df['Mi']*df['Wi'].sum(skipna = True)
                 item.gamma_output = df
-
-        # rmse = 100*error_array.mean()**0.5
     
         return 100*error_array.mean()**0.5
         
@@ -174,12 +185,14 @@ class FlashExpDataCollection(FlashExperimentData, dict):
         lb[17:] = init_vals[17:]-init_vals[17:]*0.05
         lb[0] = -np.inf
         ub[0] = np.inf
+    
         
         # self.gamma_distribution(init_vals, reg_variables)
         res = optim.minimize(self.gamma_distribution, args=(reg_variables), x0=init_vals,
                              method = 'SLSQP', bounds=optim.Bounds(lb, ub), options={'maxiter':10000})
         res_df = pd.DataFrame({'Variables': reg_variables, 'Values':res.x})
         print('RMSE: ', res.fun)
+        print(res_df)
 
         self.gamma_distribution(res.x, reg_variables, rmse_switch = True)
         
@@ -278,7 +291,8 @@ if __name__ == "__main__":
     cl_report = CoreLabsXLSXLoader(input_file) #, worksheet=['C.1', 'C.4']
     sample_collection = cl_report.read()
     # print(sample_collection['C.1'].c10_heavy_end_lqd)
-    sample_collection.gamma_distribution_fit()
+    sample_collection['C.1']._calculate_MW()
+    # sample_collection.gamma_distribution_fit()
     
     print("--- Execution time %s seconds ---" % (time.time() - start_time))
     
