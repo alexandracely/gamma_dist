@@ -35,9 +35,23 @@ class FlashExperimentData:
         self.gamma_output = None
         self.depth = None
         self.cylinder = None
+        self.pc_db = pd.read_excel(r'.\DATA\Components.xlsx', sheet_name = 'Sheet1',
+                   nrows = 53, usecols = 'A:G, I', header = 0, 
+                   na_values = [''])
     
     def assign_composition(self):
         pass
+    
+    # def _test(self, n=10):
+    #     df = self.liquid[self.liquid['lqd_wp'] != 0].copy()
+    #     df.reset_index(drop=True, inplace=True)
+    #     i = df[df['scn'] == 'C'+str(n)].index[0]
+    #     print(i)
+    #     mw = self.av_lqd_mw
+    #     df = df.merge(self.pc_db[['CoreLab Name', 'MW_lab']], how='left', 
+    #                   left_on=['cl_name'], right_on=['CoreLab Name']).drop(['CoreLab Name'], axis=1)
+    #     df.loc[i:, 'MW_lab'] = df.apply(lambda x : x['lqd_wp']*mw/x['lqd_mp'], axis = 1)
+    #     print(df)
     
     # The following property decorators are to define the heavy 
     # end of the liquid fraction.
@@ -54,9 +68,13 @@ class FlashExperimentData:
     # resulting MW but this will hopefully be addressed by regression.
     def _calculate_MW(self, n=10):
         df = self.liquid[self.liquid['lqd_wp'] != 0].copy()
+        df.reset_index(drop=True, inplace=True)
         mw = self.av_lqd_mw
         i = df[df['scn'] == 'C'+str(n)].index[0]
-        df['MW_lab'] = df.apply(lambda x : x['lqd_wp']*mw/x['lqd_mp'], axis = 1)
+        # df['MW_lab'] = df.apply(lambda x : x['lqd_wp']*mw/x['lqd_mp'], axis = 1)
+        df = df.merge(self.pc_db[['CoreLab Name', 'MW_lab']], how='left', 
+                      left_on=['cl_name'], right_on=['CoreLab Name']).drop(['CoreLab Name'], axis=1)
+        df.loc[i:, 'MW_lab'] = df.apply(lambda x : x['lqd_wp']*mw/x['lqd_mp'], axis = 1)
         a = df.loc[i:, 'lqd_wp'].sum()/100
         b = 1/self.av_lqd_mw
         c = df.loc[:i-1, 'lqd_wp'].div(df.loc[:i-1, 'MW_lab']).sum()/100
@@ -308,8 +326,6 @@ if __name__ == "__main__":
     input_file = '.\DATA\PS1.xlsx'
     cl_report = CoreLabsXLSXLoader(input_file) #, worksheet=['C.1', 'C.4']
     sample_collection = cl_report.read()
-    # print(sample_collection['C.1'].c10_heavy_end_lqd)
-    # sample_collection['C.1']._calculate_MW()
     sample_collection.gamma_distribution_fit()
     sample_collection.gamma_distribution_export(r'.\DATA\gamma.csv')
     sample_collection.gamma_distribution_plot()
